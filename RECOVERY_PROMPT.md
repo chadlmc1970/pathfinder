@@ -98,7 +98,8 @@ Located in `/Users/I870089/pathfinder/backend/app/api/v1/`:
 
 **Recommendations** (`recommendations.py`):
 - `GET /api/v1/recommendations/?user_id={id}` - Get recommendations for user
-- `POST /api/v1/recommendations/` - Create recommendation
+- `POST /api/v1/recommendations/generate?user_id={id}&limit=10` - **AI-powered generation** (Claude 4.6)
+- `POST /api/v1/recommendations/` - Create recommendation (manual)
 - `PUT /api/v1/recommendations/{id}/clicked` - Mark as clicked
 
 ### ✅ Seed Data
@@ -140,6 +141,64 @@ File: `/Users/I870089/pathfinder/backend/seed_data.py`
 - **Commit c15e693:** Fixed `career.py` schema - changed `skills` from `Dict` to `List[str]`
 - **Reason:** Seed data has skills as array `["Math", "Physics"]`, not dict `{"technical": [...], "soft": [...]}`
 - **Result:** `GET /api/v1/careers/` now returns valid JSON (was throwing 500 error)
+- **Commit e8c62c6:** Added AI-powered recommendations engine with Claude 4.6
+- **Result:** `POST /api/v1/recommendations/generate` now generates personalized career matches
+
+### ✅ AI Recommendations Engine (COMPLETE - March 17, 2026)
+**File:** `/Users/I870089/pathfinder/backend/app/api/v1/recommendations.py`
+
+**Endpoint:** `POST /api/v1/recommendations/generate?user_id={id}&limit=10`
+
+**Algorithm:**
+1. **Analyze Engagement History** - Queries all user engagement events (likes, saves, skips, watches)
+2. **Build Interest DNA Profile** - Calculates patterns: like rate, skip rate, preferred industries, salary ranges, education levels
+3. **Update User Profile** - Saves Interest DNA to `user.interest_dna` JSON field for analytics
+4. **Call Claude 4.6 API** - Sends Interest DNA + available careers to Claude Sonnet 4.6
+5. **AI Analysis** - Claude analyzes patterns and generates personalized matches with reasoning
+6. **Store Recommendations** - Saves career IDs, normalized scores (0-1), and reasoning to database
+7. **Return Results** - Returns top N careers ordered by match score
+
+**Interest DNA Structure:**
+```json
+{
+  "total_engagements": 15,
+  "like_rate": 0.6,
+  "skip_rate": 0.2,
+  "liked_careers": ["Petroleum Engineer", "Marine Biologist"],
+  "liked_industries": ["Energy", "Science"],
+  "liked_salary_ranges": ["$85k-$150k", "$50k-$95k"],
+  "preferred_education": ["Bachelor's Degree"]
+}
+```
+
+**Example API Call:**
+```bash
+curl -X POST 'https://pathfinder-api.onrender.com/api/v1/recommendations/generate?user_id=1&limit=10'
+```
+
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "user_id": 1,
+    "career_id": 22,
+    "score": 0.95,
+    "reason": "Based on your interest in Science and Marine Biology, this career offers hands-on research opportunities and requires a Bachelor's Degree.",
+    "shown_at": "2026-03-17T19:45:00Z",
+    "clicked": false
+  }
+]
+```
+
+**Error Handling:**
+- Returns 404 if user doesn't exist
+- Returns 400 if user has no engagement history
+- Returns 400 if user has engaged with all available careers
+- Returns 500 if Claude API fails (with detailed error message)
+- Handles JSON extraction from Claude responses (with/without markdown code blocks)
+- Validates career IDs before storing recommendations
+- Updates existing recommendations instead of duplicating
 
 ---
 
@@ -159,52 +218,16 @@ CORS_ORIGINS=https://pathfinder-dashboard.onrender.com,https://pathfinder-mobile
 
 ## What's NOT Done Yet
 
-### ❌ AI Recommendations Logic
-**File:** `/Users/I870089/pathfinder/backend/app/api/v1/recommendations.py`
+### ❌ Test Seed Data for Frontend Development
+**Status:** Need to create realistic test data for UI expert
 
-**Current State:**
-- Endpoint exists and returns data from database
-- But no AI logic yet - it's just a CRUD endpoint
+**Needed:**
+1. 3-5 test users with realistic profiles
+2. 20-30 engagement events (likes, skips, watches) distributed across users
+3. Pre-generated AI recommendations for each user
+4. This gives UI expert real data to build against
 
-**Needs Implementation:**
-1. Analyze user engagement history (query Engagement table)
-2. Build "Interest DNA" profile from like/skip patterns
-3. Call Claude 4.6 API to generate personalized career matches
-4. Score recommendations (0-100)
-5. Store reasoning text for each recommendation
-6. Return top 10 careers ordered by score
-
-**Suggested Approach:**
-```python
-# In recommendations.py, add new endpoint:
-@router.post("/generate")
-async def generate_recommendations(user_id: int, db: Session = Depends(get_db)):
-    # 1. Get user's engagement history
-    engagements = db.query(Engagement).filter(Engagement.user_id == user_id).all()
-
-    # 2. Get liked/saved careers
-    liked_career_ids = [e.career_id for e in engagements if e.action in ['like', 'save']]
-    liked_careers = db.query(Career).filter(Career.id.in_(liked_career_ids)).all()
-
-    # 3. Build prompt for Claude
-    prompt = f"""
-    User has shown interest in these careers:
-    {[c.title for c in liked_careers]}
-
-    Louisiana career options available:
-    {all_careers_json}
-
-    Generate 10 personalized career recommendations with scores (0-100) and reasoning.
-    """
-
-    # 4. Call Claude API
-    from anthropic import Anthropic
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    response = client.messages.create(...)
-
-    # 5. Parse response and save to Recommendation table
-    # 6. Return recommendations
-```
+**Priority:** HIGH - Unblocks frontend development
 
 ### ❌ API Documentation
 - No Swagger/OpenAPI docs yet (FastAPI generates this automatically at `/docs`)
@@ -273,8 +296,11 @@ curl -X POST https://pathfinder-api.onrender.com/api/v1/engagement/ \
     "action": "like"
   }'
 
-# Get recommendations for user
+# Get recommendations for user (returns AI-generated recommendations)
 curl https://pathfinder-api.onrender.com/api/v1/recommendations/?user_id=1
+
+# Generate NEW AI recommendations (requires engagement history)
+curl -X POST https://pathfinder-api.onrender.com/api/v1/recommendations/generate?user_id=1&limit=10
 ```
 
 ---
@@ -295,31 +321,26 @@ curl https://pathfinder-api.onrender.com/api/v1/recommendations/?user_id=1
 
 ## Your Next Tasks (Priority Order)
 
-1. **Implement AI Recommendations Logic** (30 min)
-   - File: `/Users/I870089/pathfinder/backend/app/api/v1/recommendations.py`
-   - Add `POST /api/v1/recommendations/generate` endpoint
-   - Integrate Claude 4.6 API
-   - Build Interest DNA algorithm
+1. **Add Test Seed Data** (15 min) - **HIGHEST PRIORITY**
+   - Create 3-5 test users (realistic 8th grade profiles)
+   - Generate 20-30 engagement events (likes/skips/watches)
+   - Run AI recommendations generator for each user
+   - This gives UI expert real data to work with immediately
 
-2. **Add Seed Data for Testing** (15 min)
-   - Create 3-5 test users
-   - Generate realistic engagement events (likes/skips)
-   - This gives UI expert real data to work with
-
-3. **Create Deployment Verification Script** (10 min)
+2. **Create Deployment Verification Script** (10 min)
    - File: `/Users/I870089/pathfinder/backend/verify_deployment.py`
-   - Smoke tests for all endpoints
+   - Smoke tests for all endpoints (including AI recommendations)
    - Can run after Render deploys
 
-4. **Add API Documentation** (10 min)
+3. **Add API Documentation** (10 min)
    - Customize FastAPI auto-generated docs at `/docs`
-   - Add descriptions and examples
+   - Add descriptions and examples for AI recommendations endpoint
 
-5. **Backend Tests** (30 min)
+4. **Backend Tests** (30 min)
    - Add pytest suite
-   - Test all CRUD endpoints
+   - Test all CRUD endpoints + AI recommendations logic
 
-6. **Authentication Middleware** (25 min)
+5. **Authentication Middleware** (25 min)
    - JWT token validation
    - Protect admin endpoints
 
@@ -399,6 +420,6 @@ Then proceed with your assigned tasks above.
 
 ---
 
-**Last Updated:** 2026-03-17 14:45 CST
-**Git Commit:** c15e693 (Fix career schema: skills is a List not Dict)
-**Backend Status:** 100% Complete - Ready for AI recommendations implementation
+**Last Updated:** 2026-03-17 15:00 CST
+**Git Commit:** e8c62c6 (Add AI-powered recommendations engine with Claude 4.6)
+**Backend Status:** AI Engine COMPLETE ✅ - Next: Test seed data for frontend development
