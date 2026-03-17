@@ -1,33 +1,104 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { VideoWithCareer, recordEngagement } from '../services/api';
 
 const { height, width } = Dimensions.get('window');
 
 interface VideoCardProps {
-  video: {
-    id: string;
-    career_title: string;
-    video_url: string;
-    thumbnail_url: string;
-    description: string;
-    average_salary: number;
-    education_required: string;
-  };
+  video: VideoWithCareer;
   isActive: boolean;
 }
 
 export default function VideoCard({ video, isActive }: VideoCardProps) {
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [watchStartTime, setWatchStartTime] = useState<number | null>(null);
+  const videoRef = useRef<Video>(null);
+
+  useEffect(() => {
+    if (isActive) {
+      videoRef.current?.playAsync();
+      setWatchStartTime(Date.now());
+    } else {
+      videoRef.current?.pauseAsync();
+      if (watchStartTime) {
+        const watchDuration = (Date.now() - watchStartTime) / 1000;
+        recordEngagement({
+          career_id: video.career_id,
+          video_id: video.id,
+          action: 'watched',
+          watch_duration_seconds: watchDuration,
+        });
+      }
+      setWatchStartTime(null);
+    }
+  }, [isActive]);
+
+  const handleLike = async () => {
+    const newLiked = !liked;
+    setLiked(newLiked);
+    if (newLiked) {
+      await recordEngagement({
+        career_id: video.career_id,
+        video_id: video.id,
+        action: 'liked',
+      });
+    }
+  };
+
+  const handleSave = async () => {
+    const newSaved = !saved;
+    setSaved(newSaved);
+    if (newSaved) {
+      await recordEngagement({
+        career_id: video.career_id,
+        video_id: video.id,
+        action: 'saved',
+      });
+    }
+  };
+
+  const handleShare = async () => {
+    await recordEngagement({
+      career_id: video.career_id,
+      video_id: video.id,
+      action: 'shared',
+    });
+    // TODO: Implement native share functionality
+  };
+
+  const handleSkip = async () => {
+    await recordEngagement({
+      career_id: video.career_id,
+      video_id: video.id,
+      action: 'skipped',
+    });
+    // TODO: Scroll to next video
+  };
+
+  const formatSalary = () => {
+    const { salary_range_min, salary_range_max } = video.career;
+    if (salary_range_min && salary_range_max) {
+      return `$${(salary_range_min / 1000).toFixed(0)}K-$${(salary_range_max / 1000).toFixed(0)}K/year`;
+    } else if (salary_range_min) {
+      return `$${(salary_range_min / 1000).toFixed(0)}K+/year`;
+    }
+    return 'Salary varies';
+  };
 
   return (
     <View style={styles.container}>
-      {/* Video placeholder - will integrate expo-av for actual video */}
-      <Image
-        source={{ uri: video.thumbnail_url }}
+      {/* Video player */}
+      <Video
+        ref={videoRef}
+        source={{ uri: video.blob_url }}
         style={styles.video}
-        resizeMode="cover"
+        resizeMode={ResizeMode.COVER}
+        isLooping
+        shouldPlay={isActive}
+        useNativeControls={false}
       />
 
       {/* Gradient overlay */}
@@ -38,19 +109,18 @@ export default function VideoCard({ video, isActive }: VideoCardProps) {
 
       {/* Career info */}
       <View style={styles.infoContainer}>
-        <Text style={styles.careerTitle}>{video.career_title}</Text>
-        <Text style={styles.description}>{video.description}</Text>
-        <Text style={styles.salary}>
-          Average Salary: ${(video.average_salary / 1000).toFixed(0)}K/year
-        </Text>
-        <Text style={styles.education}>{video.education_required}</Text>
+        <Text style={styles.careerTitle}>{video.career.title}</Text>
+        <Text style={styles.industry}>{video.career.industry_sector}</Text>
+        <Text style={styles.description}>{video.career.description}</Text>
+        <Text style={styles.salary}>{formatSalary()}</Text>
+        <Text style={styles.education}>{video.career.education_required}</Text>
       </View>
 
       {/* Action buttons */}
       <View style={styles.actionsContainer}>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => setLiked(!liked)}
+          onPress={handleLike}
         >
           <Text style={styles.actionIcon}>{liked ? '❤️' : '🤍'}</Text>
           <Text style={styles.actionLabel}>Like</Text>
@@ -58,18 +128,24 @@ export default function VideoCard({ video, isActive }: VideoCardProps) {
 
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => setSaved(!saved)}
+          onPress={handleSave}
         >
           <Text style={styles.actionIcon}>{saved ? '⭐' : '☆'}</Text>
           <Text style={styles.actionLabel}>Save</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleShare}
+        >
           <Text style={styles.actionIcon}>↗️</Text>
           <Text style={styles.actionLabel}>Share</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleSkip}
+        >
           <Text style={styles.actionIcon}>→</Text>
           <Text style={styles.actionLabel}>Skip</Text>
         </TouchableOpacity>
@@ -105,7 +181,13 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#fff',
+    marginBottom: 4,
+  },
+  industry: {
+    fontSize: 16,
+    color: '#A3A3A3',
     marginBottom: 8,
+    fontWeight: '500',
   },
   description: {
     fontSize: 16,
