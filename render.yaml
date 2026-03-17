@@ -1,0 +1,16 @@
+services:
+  # Backend API
+  - type: web
+    name: pathfinder-api
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://pathfinder-dashboard.onrender.com,https://pathfinder-mobile.onrender.com
+      - key: PYTHON_VERSION
+        value: 3.11.15
