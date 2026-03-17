@@ -10,7 +10,7 @@ class CareerBase(BaseModel):
     salary_range_min: Optional[int] = None
     salary_range_max: Optional[int] = None
     education_required: str
-    skills: Optional[Dict] = None
+    skills: Optional[List[str]] = None  # List of skill strings
     pathway: Optional[Dict] = None
 
 
